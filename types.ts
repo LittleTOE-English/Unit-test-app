@@ -1,4 +1,5 @@
 export enum AppState {
+  WELCOME = 'WELCOME',
   IDLE = 'IDLE',
   RECORDING = 'RECORDING',
   ANALYZING = 'ANALYZING',
