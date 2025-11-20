@@ -1,5 +1,5 @@
 export enum AppState {
-  WELCOME = 'WELCOME',
+  UNIT_SELECTION = 'UNIT_SELECTION',
   IDLE = 'IDLE',
   RECORDING = 'RECORDING',
   ANALYZING = 'ANALYZING',
@@ -26,4 +26,6 @@ export interface SessionHistoryItem extends AssessmentResult {
   questionId: number;
   questionText: string;
   timestamp: string;
+  studentName: string;
+  unit: number;
 }

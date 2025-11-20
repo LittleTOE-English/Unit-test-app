@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppState, AssessmentResult, Question, SessionHistoryItem } from './types';
-import { QUESTIONS } from './constants';
+import { UNIT_QUESTIONS } from './constants';
 import { analyzeSpeaking } from './services/geminiService';
 import Recorder from './components/Recorder';
 import ResultCard from './components/ResultCard';
-import { Volume2, Loader2, Download, FileSpreadsheet, User, Play } from 'lucide-react';
+import UnitSelection from './components/UnitSelection';
+import { Volume2, Loader2, Download, FileSpreadsheet, Home } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -22,57 +23,71 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const App: React.FC = () => {
-  // Change initial state to WELCOME
-  const [appState, setAppState] = useState<AppState>(AppState.WELCOME);
+  const [appState, setAppState] = useState<AppState>(AppState.UNIT_SELECTION);
+  
+  // Session State
+  const [studentName, setStudentName] = useState("");
+  const [selectedUnit, setSelectedUnit] = useState<number>(1);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  
   const [result, setResult] = useState<AssessmentResult | null>(null);
   const [loadingMessage, setLoadingMessage] = useState("Thinking...");
   const [history, setHistory] = useState<SessionHistoryItem[]>([]);
-  
-  // New state for student name
-  const [studentName, setStudentName] = useState("");
 
-  const currentQuestion: Question = QUESTIONS[currentQuestionIndex];
+  // Get questions for selected unit, fallback to empty array if safe
+  const currentQuestions = UNIT_QUESTIONS[selectedUnit] || [];
+  const currentQuestion: Question | undefined = currentQuestions[currentQuestionIndex];
 
-  const handleStartSession = () => {
-    if (studentName.trim()) {
-      setAppState(AppState.IDLE);
-    } else {
-      alert("Please enter your name first! / Con hãy nhập tên trước nhé!");
-    }
+  const handleStartSession = (name: string, unit: number) => {
+    setStudentName(name);
+    setSelectedUnit(unit);
+    setCurrentQuestionIndex(0);
+    setHistory([]); // Clear previous history for new session
+    setAppState(AppState.IDLE);
   };
 
   const handleNextQuestion = () => {
     setAppState(AppState.IDLE);
     setResult(null);
-    setCurrentQuestionIndex((prev) => (prev + 1) % QUESTIONS.length);
+    // Cycle through questions of the SELECTED UNIT
+    if (currentQuestions.length > 0) {
+        setCurrentQuestionIndex((prev) => (prev + 1) % currentQuestions.length);
+    }
   };
 
   const handleRetry = () => {
     setAppState(AppState.IDLE);
     setResult(null);
-    // Index stays the same to repeat the question
+    // Index stays the same
+  };
+
+  const handleHome = () => {
+    if (confirm("Are you sure you want to end this session and go back to the menu?")) {
+        setAppState(AppState.UNIT_SELECTION);
+        setStudentName("");
+        setResult(null);
+    }
   };
 
   const speakQuestion = useCallback(() => {
-    if ('speechSynthesis' in window) {
+    if ('speechSynthesis' in window && currentQuestion) {
       const utterance = new SpeechSynthesisUtterance(currentQuestion.text);
       utterance.lang = 'en-US';
-      utterance.rate = 0.9; // Slightly slower for kids
+      utterance.rate = 0.9; 
       window.speechSynthesis.speak(utterance);
     }
   }, [currentQuestion]);
 
-  // Auto-speak question when it changes
   useEffect(() => {
-    if (appState === AppState.IDLE) {
-      // Small delay to ensure UI is ready
+    if (appState === AppState.IDLE && currentQuestion) {
       const timer = setTimeout(() => speakQuestion(), 500);
       return () => clearTimeout(timer);
     }
-  }, [appState, currentQuestionIndex, speakQuestion]);
+  }, [appState, currentQuestionIndex, speakQuestion, currentQuestion]);
 
   const handleRecordingComplete = async (audioBlob: Blob) => {
+    if (!currentQuestion) return;
+
     setAppState(AppState.ANALYZING);
     const messages = ["Listening closely...", "Checking grammar...", "Preparing stickers..."];
     let msgIdx = 0;
@@ -92,7 +107,9 @@ const App: React.FC = () => {
         ...assessment,
         questionId: currentQuestion.id,
         questionText: currentQuestion.text,
-        timestamp: new Date().toLocaleString()
+        timestamp: new Date().toLocaleString(),
+        studentName: studentName,
+        unit: selectedUnit
       };
       setHistory(prev => [...prev, historyItem]);
       
@@ -111,25 +128,20 @@ const App: React.FC = () => {
         return;
     }
 
-    // 1. Calculate Averages for the Chart
     const total = history.length;
     const avgPron = history.reduce((sum, item) => sum + item.pronunciationScore, 0) / total;
     const avgGram = history.reduce((sum, item) => sum + item.grammarScore, 0) / total;
     const avgRel = history.reduce((sum, item) => sum + item.relevanceScore, 0) / total;
 
-    // Data structured specifically for the requested Chart
     const chartData = [
-      { "Info": "Student Name", "Value": studentName },
-      { "Info": "Date", "Value": new Date().toLocaleDateString() },
-      { "Info": "", "Value": "" }, // Spacer
-      { "Info": "Criteria", "Value": "Average Score" }, // Pseudo-header for chart
-      { "Info": "Pronunciation", "Value": Number(avgPron.toFixed(2)) },
-      { "Info": "Grammar", "Value": Number(avgGram.toFixed(2)) },
-      { "Info": "Relevance (Right Answer)", "Value": Number(avgRel.toFixed(2)) },
+      { "Criteria": "Pronunciation", "Average Score": Number(avgPron.toFixed(2)) },
+      { "Criteria": "Grammar", "Average Score": Number(avgGram.toFixed(2)) },
+      { "Criteria": "Relevance (Right Answer)", "Average Score": Number(avgRel.toFixed(2)) },
     ];
 
-    // 2. Prepare Detailed Data
     const detailData = history.map(item => ({
+        "Student": item.studentName,
+        "Unit": item.unit,
         "Question": item.questionText,
         "Pronunciation": item.pronunciationScore,
         "Grammar": item.grammarScore,
@@ -139,80 +151,51 @@ const App: React.FC = () => {
         "Time": item.timestamp
     }));
 
-    // Create worksheets
-    const wsChart = XLSX.utils.json_to_sheet(chartData, { skipHeader: true });
+    const wsChart = XLSX.utils.json_to_sheet(chartData);
     const wsDetail = XLSX.utils.json_to_sheet(detailData);
     
-    // Set column widths
-    wsChart['!cols'] = [{ wch: 25 }, { wch: 20 }];
+    wsChart['!cols'] = [{ wch: 25 }, { wch: 15 }];
     wsDetail['!cols'] = [
-        { wch: 30 }, 
+        { wch: 15 }, // Name
+        { wch: 8 },  // Unit
+        { wch: 30 }, // Question
         { wch: 15 }, 
         { wch: 15 }, 
         { wch: 15 }, 
         { wch: 40 }, 
         { wch: 40 }, 
-        { wch: 20 }
+        { wch: 20 } 
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsChart, "Summary & Chart");
+    XLSX.utils.book_append_sheet(wb, wsChart, "Chart Data");
     XLSX.utils.book_append_sheet(wb, wsDetail, "Detailed Results");
 
-    // Generate file name with Student Name and Date
     const dateStr = new Date().toISOString().slice(0,10);
-    const safeName = studentName.replace(/[^a-z0-9]/gi, '_'); // Remove special chars for filename
-    XLSX.writeFile(wb, `LittleTOEs_${safeName}_${dateStr}.xlsx`);
+    const safeName = studentName.replace(/[^a-z0-9]/gi, '_');
+    XLSX.writeFile(wb, `LittleTOEs_Unit${selectedUnit}_${safeName}_${dateStr}.xlsx`);
   };
 
   const renderContent = () => {
     switch (appState) {
-      case AppState.WELCOME:
-        return (
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 border-4 border-grape-400 animate-in fade-in slide-in-from-bottom-4">
-            <div className="text-center mb-8">
-               <div className="w-20 h-20 bg-lime-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <User size={40} className="text-lime-600" />
-               </div>
-               <h2 className="text-2xl font-bold text-grape-700">Hello Friend!</h2>
-               <p className="text-gray-500">What is your name?</p>
-            </div>
-
-            <div className="space-y-6">
-                <input 
-                    type="text" 
-                    placeholder="My name is..."
-                    className="w-full p-4 text-lg text-center border-2 border-grape-200 rounded-2xl focus:border-grape-500 focus:ring-2 focus:ring-grape-200 outline-none transition-all text-grape-800 font-bold"
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleStartSession()}
-                />
-                
-                <button
-                    onClick={handleStartSession}
-                    className="w-full py-4 bg-grape-500 hover:bg-grape-600 text-white text-xl font-bold rounded-2xl shadow-lg transform transition-all active:scale-95 flex items-center justify-center space-x-2"
-                >
-                    <span>Let's Start!</span>
-                    <Play fill="currentColor" size={20} />
-                </button>
-            </div>
-          </div>
-        );
+      case AppState.UNIT_SELECTION:
+        return <UnitSelection onStart={handleStartSession} />;
 
       case AppState.IDLE:
       case AppState.RECORDING:
+        if (!currentQuestion) return <div>No questions found for this Unit</div>;
+        
         return (
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 border-t-8 border-grape-500 animate-in fade-in zoom-in duration-300">
-            <div className="text-center mb-8">
-              <div className="flex justify-between items-center mb-4">
-                <div className="inline-block bg-grape-100 text-grape-700 px-4 py-1 rounded-full text-sm font-bold">
-                    Question {currentQuestion.id}
-                </div>
-                <div className="text-xs text-gray-400 font-bold uppercase tracking-widest">
-                    {studentName}
-                </div>
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 border-t-8 border-grape-500 animate-in fade-in zoom-in duration-300 relative">
+            {/* Unit Badge */}
+            <div className="absolute -top-5 left-1/2 transform -translate-x-1/2 bg-lime-500 text-white px-4 py-1 rounded-full text-sm font-bold shadow-md whitespace-nowrap">
+              Unit {selectedUnit} • {studentName}
+            </div>
+
+            <div className="text-center mb-8 mt-4">
+              <div className="inline-block bg-grape-100 text-grape-700 px-4 py-1 rounded-full text-sm font-bold mb-4">
+                Question {currentQuestion.id}
               </div>
-              
               <h1 className="text-3xl font-bold text-gray-800 mb-4 leading-tight">
                 {currentQuestion.text}
               </h1>
@@ -273,10 +256,20 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-100 to-grape-100 flex flex-col items-center justify-center p-4 relative">
-      <header className="absolute top-6 left-0 w-full text-center z-10">
+      <header className="absolute top-6 left-0 w-full flex justify-center items-center px-6 z-10">
         <h1 className="text-3xl md:text-4xl font-bold text-grape-700 drop-shadow-sm tracking-tight">
           Little TOEs 👣
         </h1>
+        
+        {appState !== AppState.UNIT_SELECTION && (
+           <button 
+             onClick={handleHome}
+             className="absolute right-6 top-1/2 -translate-y-1/2 bg-white p-2 rounded-full shadow-sm text-gray-500 hover:text-grape-600"
+             title="Back to Menu"
+           >
+             <Home size={24} />
+           </button>
+        )}
       </header>
       
       <main className="w-full flex justify-center items-center flex-grow pt-16 pb-6 z-0">
@@ -292,7 +285,7 @@ const App: React.FC = () => {
                 className="flex items-center gap-2 bg-white text-green-600 px-3 py-2 rounded-lg shadow-sm hover:shadow-md hover:scale-105 transition-all border border-green-100 font-bold text-xs"
             >
                 <FileSpreadsheet size={16} />
-                Report
+                Download Report
             </button>
         )}
       </footer>
