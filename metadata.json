@@ -1,0 +1,7 @@
+{
+  "name": "Little TOEs - GrapeSEED Style",
+  "description": "An interactive English speaking practice app for children. It acts as a friendly examiner to grade pronunciation, grammar, and relevance using Gemini 2.5 Multimodal capabilities.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
