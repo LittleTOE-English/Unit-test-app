@@ -2,8 +2,8 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { AssessmentResult } from "../types";
 
 // Initialize Gemini Client
-// NOTE: Ensure process.env.API_KEY is available in your environment
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// NOTE: Ensure process.env.GEMINI_API_KEY is available in your environment
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const MODEL_NAME = "gemini-2.5-flash";
 
